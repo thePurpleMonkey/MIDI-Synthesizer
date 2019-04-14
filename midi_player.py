@@ -73,7 +73,6 @@ def parse_midi(filename):
 
 	return score
 
-
 class SynthesizationError(Exception):
 	pass
 
@@ -95,22 +94,31 @@ class Note:
 
 		return Note.cache[self]
 
+	# For debugging and display
 	def __str__(self):
 		return "Note(note={}, start={}, duration={}, velocity={})".format(self.note, self.start, self.duration, self.velocity)
 
-	def __lt__(self, other):
-		return self.start < other.start
-
-	def __eq__(self, other):
-		return (self.note, self.duration) == (other.note, other.duration)
-
-	def __hash__(self):
-		return hash((self.note, self.duration))
-
+	# For debugging and display
 	def __repr__(self):
 		return str(self)
 
+	# For sorting notes in score
+	def __lt__(self, other):
+		return self.start < other.start
+
+	# For synth caching
+	def __eq__(self, other):
+		return (self.note, self.duration) == (other.note, other.duration)
+
+	# For synth caching
+	def __hash__(self):
+		return hash((self.note, self.duration))
+
 if __name__ == "__main__":
+	if len(sys.argv) < 3:
+		print("USAGE: python3 {} <midi input file> <wav output file>".format(sys.argv[0]), file=sys.stderr)
+		exit(1)
+
 	print("Parsing MIDI file...")
 	score = parse_midi(sys.argv[1])
 
