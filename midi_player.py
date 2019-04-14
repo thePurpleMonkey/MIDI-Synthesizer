@@ -2,7 +2,8 @@ import wave, mido, sys, math, struct, array
 
 SAMPLE_RATE = 44100
 
-# Frequencies obtained from: http://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
+# Generate conversion from MIDI note to frequency.
+# Obtained from: http://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
 FREQS = {}
 for n in range(128):
 	FREQS[n] = 440 * 2**((n-69)/12)
@@ -36,12 +37,13 @@ def scale(samples):
 
 	return scaled_samples
 
-def parse_midi(midi_file):
+def parse_midi(filename):
 	score = []
 	playing = []
 	total_time = 0
 	tempo = 500000
-	total_samples = 0
+
+	midi_file = mido.MidiFile(filename)
 
 	for track in midi_file.tracks:
 		for msg in track:
@@ -61,7 +63,6 @@ def parse_midi(midi_file):
 				for j in range(len(playing)):
 					if playing[j].note == msg.note:
 						playing[j].duration = math.floor(SAMPLE_RATE * mido.tick2second(total_time, midi_file.ticks_per_beat, tempo)) - playing[j].start
-						total_samples = max(total_samples, playing[j].start + playing[j].duration)
 						score.append(playing.pop(j))
 						break
 
@@ -70,7 +71,7 @@ def parse_midi(midi_file):
 	score.sort()
 	print("Score length: ", len(score))
 
-	return score, total_samples
+	return score
 
 
 class SynthesizationError(Exception):
@@ -110,7 +111,12 @@ class Note:
 		return str(self)
 
 if __name__ == "__main__":
-	score, total_samples = parse_midi(mido.MidiFile(sys.argv[1]))
+	print("Parsing MIDI file...")
+	score = parse_midi(sys.argv[1])
+
+	total_samples = 0
+	for note in score:
+		total_samples = max(total_samples, note.start + note.duration)
 
 	raw_samples = array.array('d', [0] * total_samples)
 
