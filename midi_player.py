@@ -1,7 +1,5 @@
 import wave, mido, sys, math, struct, array
 
-input_file = sys.argv[1]
-
 SAMPLE_RATE = 44100
 
 FREQS = {
@@ -59,21 +57,9 @@ FREQS = {
 	91: 1567.98
 }
 
-def sine(nsamples, frequency):
-	result = array.array('d')
-	for i in range(nsamples):
-		w = 2.0 * math.pi * frequency * i
-		s = math.sin(w / SAMPLE_RATE)
-		result.append(s)
-	return result
-
-def sine_harmonics(nsamples, frequency, num_harmonics=0):
+def sine(nsamples, frequency, num_harmonics=0):
 	result = array.array('d', [0] * nsamples)
-	# for i in range(nsamples):
-	# 	w = 2.0 * math.pi * frequency * i
-	# 	s = math.sin(w / SAMPLE_RATE)
-	# 	result.append(s)
-
+	
 	for i in range(num_harmonics+1):
 		for j in range(nsamples):
 			w = 2.0 * math.pi * (frequency * (1 + 2*i)) * j
@@ -83,16 +69,18 @@ def sine_harmonics(nsamples, frequency, num_harmonics=0):
 	return result
 
 def scale(samples):
+	# Calculate scaling factors
 	old_max = max(samples)
 	old_min = min(samples)
 	new_max = 2**15-1
 	new_min = -2**15
-	
+
 	old_range = (old_max - old_min)  
 	new_range = (new_max - new_min) 
 
 	scaled_samples = array.array("h") 
 	
+	# Scale each sample
 	for sample in samples:
 		scaled_samples.append(round((((sample - old_min) * new_range) / old_range) + new_min))
 
@@ -120,87 +108,83 @@ class Note:
 	def __repr__(self):
 		return str(self)
 
-score = []
-playing = []
-total_time = 0
-tempo = 0
-total_samples = 0
+if __name__ == "__main__":
+	score = []
+	playing = []
+	total_time = 0
+	tempo = 0
+	total_samples = 0
 
-mid = mido.MidiFile(input_file)
+	mid = mido.MidiFile(sys.argv[1])
 
-for i, track in enumerate(mid.tracks):
-	for msg in track:
-		if not msg.is_meta:
-			total_time += msg.time
+	for i, track in enumerate(mid.tracks):
+		for msg in track:
+			if not msg.is_meta:
+				total_time += msg.time
 
-		# print(msg)
+			# print(msg)
 
-		if msg.type == "set_tempo":
-			tempo = msg.tempo
-			print("Tempo set.")
-		elif msg.type == "note_on" and msg.velocity > 0:
-			start_sample = math.floor(SAMPLE_RATE * mido.tick2second(total_time, mid.ticks_per_beat, tempo))
-			playing.append(Note(msg.note, start_sample, velocity=msg.velocity))
-		
-		if msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-			for j in range(len(playing)):
-				if playing[j].note == msg.note:
-					playing[j].duration = math.floor(SAMPLE_RATE * mido.tick2second(total_time, mid.ticks_per_beat, tempo)) - playing[j].start
-					total_samples = max(total_samples, playing[j].start + playing[j].duration)
-					score.append(playing.pop(j))
-					break
+			if msg.type == "set_tempo":
+				tempo = msg.tempo
+				print("Tempo set to", tempo)
+			elif msg.type == "note_on" and msg.velocity > 0:
+				start_sample = math.floor(SAMPLE_RATE * mido.tick2second(total_time, mid.ticks_per_beat, tempo))
+				playing.append(Note(msg.note, start_sample, velocity=msg.velocity))
+			
+			if msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+				for j in range(len(playing)):
+					if playing[j].note == msg.note:
+						playing[j].duration = math.floor(SAMPLE_RATE * mido.tick2second(total_time, mid.ticks_per_beat, tempo)) - playing[j].start
+						total_samples = max(total_samples, playing[j].start + playing[j].duration)
+						score.append(playing.pop(j))
+						break
 
-print("Leftover notes:", len(playing))
-score.extend(playing)
-score.sort()
-print("Score length: ", len(score))
-# print("\n".join(str(note) for note in score[:10]))
+	print("Leftover notes:", len(playing))
+	score.extend(playing)
+	score.sort()
+	print("Score length: ", len(score))
+	# print("\n".join(str(note) for note in score[:10]))
 
-if tempo == 0:
-	print("No tempo message found! Unable to synthesize.")
-	exit(1)
+	if tempo == 0:
+		print("No tempo message found! Unable to synthesize.", file=sys.stderr)
+		exit(1)
 
-raw_samples = array.array('d', [0] * total_samples)
-count_did = 0
-count_skipped = 0
-count_total = 0
-for i, note in enumerate(score):
-	count_total += 1
-	print("\rSynthesizing note {} of {}...".format(i, len(score)), end="", flush=True)
+	raw_samples = array.array('d', [0] * total_samples)
+	count_did = 0
+	count_skipped = 0
+	count_total = 0
+	for i, note in enumerate(score):
+		count_total += 1
+		print("\rSynthesizing note {} of {}...".format(i, len(score)), end="", flush=True)
 
-	# if note.note < 60 and False:
-	# 	print("Skipping {}".format(note))
-	# 	count_skipped += 1
-	# 	continue
+		# samples = note.synthesize(sine)
+		samples = note.synthesize(sine_harmonics, num_harmonics=4)
 
-	# samples = note.synthesize(sine)
-	samples = note.synthesize(sine_harmonics, num_harmonics=4)
+		count_did += 1
 
-	count_did += 1
+		for j in range(note.duration):
+			raw_samples[note.start + j] += samples[j] * note.velocity
 
-	for j in range(note.duration):
-		raw_samples[note.start + j] += samples[j] * note.velocity
+	# print("Total notes: ", count_total)
+	# print("Skipped notes:", count_skipped)
+	# print("Synthesized notes:", count_did)
+	print("\rScaling output..." + " "*20, end="", flush=True)
+	samples = scale(raw_samples)
 
-# print("Total notes: ", count_total)
-# print("Skipped notes:", count_skipped)
-# print("Synthesized notes:", count_did)
-print("\rScaling output..." + " "*20, end="", flush=True)
-samples = scale(raw_samples)
+	print("\rWriting wav file...", end="", flush=True)
 
-print("\rWriting wav file...", end="", flush=True)
+	# Convert raw samples to 2-byte frames
+	output_frames = bytearray(len(samples) * 2)
+	for i, sample in enumerate(samples):
+		output_frames[i*2:i*2+2] = struct.pack("<h", sample)
 
-# Convert raw samples to 2-byte frames
-output_frames = bytearray(len(samples) * 2)
-for i, sample in enumerate(samples):
-	output_frames[i*2:i*2+2] = struct.pack("<h", sample)
+	# Open output file
+	out = wave.open(sys.argv[2], "wb")
+	out.setnchannels(1)
+	out.setsampwidth(2)
+	out.setframerate(SAMPLE_RATE)
 
-# Open output file
-out = wave.open(sys.argv[2], "wb")
-out.setnchannels(1)
-out.setsampwidth(2)
-out.setframerate(SAMPLE_RATE)
+	# Write samples
+	out.writeframes(output_frames)
 
-# Write samples
-out.writeframes(output_frames)
-
-print("Done." + " " * 10)
+	print("Done." + " " * 10)
