@@ -2,62 +2,11 @@ import wave, mido, sys, math, struct, array
 
 SAMPLE_RATE = 44100
 
-# Frequencies gathered from: http://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
-FREQS = {
-	32: 51.91,
-	34: 58.27,
-	36: 65.41,
-	37: 69.30,
-	39: 77.78,
-	40: 82.41,
-	41: 87.31,
-	42: 92.50,
-	43: 98.00,
-	44: 103.83,
-	45: 110.00,
-	46: 116.54,
-	47: 123.47, 
-	48: 130.81,
-	49: 138.59,
-	50: 146.83,
-	51: 155.56,
-	52: 164.81,
-	53: 174.61,
-	54: 185.00, 
-	55: 196.00,
-	56: 207.65,
-	57: 220.00,
-	58: 233.08,
-	59: 246.94, 
-	60: 261.63,
-	61: 277.18,
-	62: 293.66,
-	63: 311.13,
-	64: 329.63,
-	65: 349.23,
-	66: 369.99,
-	67: 392.00,
-	68: 415.30,
-	69: 440.00,
-	70: 466.16, 
-	71: 493.88,
-	72: 523.25,
-	73: 554.37,
-	74: 587.33,
-	75: 622.25,
-	76: 659.26,
-	77: 698.46,
-	78: 739.99,
-	79: 783.99,
-	80: 830.61,
-	81: 880.00,
-	82: 932.33,
-	83: 987.77,
-	84: 1046.50,
-	85: 1108.73,
-	91: 1567.98
-}
-
+# Frequencies obtained from: http://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
+FREQS = {}
+for n in range(128):
+	FREQS[n] = 440 * 2**((n-69)/12)
+	
 def sine(nsamples, frequency, num_harmonics=0):
 	result = array.array('d', [0] * nsamples)
 	
