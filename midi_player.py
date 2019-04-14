@@ -2,6 +2,7 @@ import wave, mido, sys, math, struct, array
 
 SAMPLE_RATE = 44100
 
+# Frequencies gathered from: http://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
 FREQS = {
 	32: 51.91,
 	34: 58.27,
@@ -86,38 +87,14 @@ def scale(samples):
 
 	return scaled_samples
 
-class Note:
-	def __init__(self, note, start=0, duration=0, velocity=100):
-		self.note = note
-		self.start = start
-		self.duration = duration
-		self.velocity = velocity
-
-	def synthesize(self, func, *args, **kwargs):
-		return func(self.duration, FREQS[self.note], *args, **kwargs)
-
-	def __str__(self):
-		return "Note(note={}, start={}, duration={}, velocity={})".format(self.note, self.start, self.duration, self.velocity)
-
-	def __lt__(self, other):
-		return self.start < other.start
-
-	def __eq__(self, other):
-		return self.start == other.start
-
-	def __repr__(self):
-		return str(self)
-
-if __name__ == "__main__":
+def parse_midi(midi_file):
 	score = []
 	playing = []
 	total_time = 0
-	tempo = 0
+	tempo = 500000
 	total_samples = 0
 
-	mid = mido.MidiFile(sys.argv[1])
-
-	for i, track in enumerate(mid.tracks):
+	for track in midi_file.tracks:
 		for msg in track:
 			if not msg.is_meta:
 				total_time += msg.time
@@ -128,13 +105,13 @@ if __name__ == "__main__":
 				tempo = msg.tempo
 				print("Tempo set to", tempo)
 			elif msg.type == "note_on" and msg.velocity > 0:
-				start_sample = math.floor(SAMPLE_RATE * mido.tick2second(total_time, mid.ticks_per_beat, tempo))
+				start_sample = math.floor(SAMPLE_RATE * mido.tick2second(total_time, midi_file.ticks_per_beat, tempo))
 				playing.append(Note(msg.note, start_sample, velocity=msg.velocity))
 			
 			if msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
 				for j in range(len(playing)):
 					if playing[j].note == msg.note:
-						playing[j].duration = math.floor(SAMPLE_RATE * mido.tick2second(total_time, mid.ticks_per_beat, tempo)) - playing[j].start
+						playing[j].duration = math.floor(SAMPLE_RATE * mido.tick2second(total_time, midi_file.ticks_per_beat, tempo)) - playing[j].start
 						total_samples = max(total_samples, playing[j].start + playing[j].duration)
 						score.append(playing.pop(j))
 						break
@@ -143,36 +120,63 @@ if __name__ == "__main__":
 	score.extend(playing)
 	score.sort()
 	print("Score length: ", len(score))
-	# print("\n".join(str(note) for note in score[:10]))
 
-	if tempo == 0:
-		print("No tempo message found! Unable to synthesize.", file=sys.stderr)
-		exit(1)
+	return score, total_samples
+
+
+class SynthesizationError(Exception):
+	pass
+
+class Note:
+	cache = dict()
+
+	def __init__(self, note, start=0, duration=0, velocity=100):
+		self.note = note
+		self.start = start
+		self.duration = duration
+		self.velocity = velocity
+
+	def synthesize(self, func, *args, **kwargs):
+		if self not in Note.cache:
+			try:
+				Note.cache[self] = func(self.duration, FREQS[self.note], *args, **kwargs)
+			except KeyError:
+				raise SynthesizationError("Unable to convert MIDI note {} to frequency!".format(self.note))
+
+		return Note.cache[self]
+
+	def __str__(self):
+		return "Note(note={}, start={}, duration={}, velocity={})".format(self.note, self.start, self.duration, self.velocity)
+
+	def __lt__(self, other):
+		return self.start < other.start
+
+	def __eq__(self, other):
+		return (self.note, self.duration) == (other.note, other.duration)
+
+	def __hash__(self):
+		return hash((self.note, self.duration))
+
+	def __repr__(self):
+		return str(self)
+
+if __name__ == "__main__":
+	score, total_samples = parse_midi(mido.MidiFile(sys.argv[1]))
 
 	raw_samples = array.array('d', [0] * total_samples)
-	count_did = 0
-	count_skipped = 0
-	count_total = 0
+
 	for i, note in enumerate(score):
-		count_total += 1
 		print("\rSynthesizing note {} of {}...".format(i, len(score)), end="", flush=True)
 
-		# samples = note.synthesize(sine)
-		samples = note.synthesize(sine_harmonics, num_harmonics=4)
-
-		count_did += 1
+		samples = note.synthesize(sine, num_harmonics=4)
 
 		for j in range(note.duration):
 			raw_samples[note.start + j] += samples[j] * note.velocity
 
-	# print("Total notes: ", count_total)
-	# print("Skipped notes:", count_skipped)
-	# print("Synthesized notes:", count_did)
 	print("\rScaling output..." + " "*20, end="", flush=True)
 	samples = scale(raw_samples)
 
 	print("\rWriting wav file...", end="", flush=True)
-
 	# Convert raw samples to 2-byte frames
 	output_frames = bytearray(len(samples) * 2)
 	for i, sample in enumerate(samples):
@@ -186,5 +190,6 @@ if __name__ == "__main__":
 
 	# Write samples
 	out.writeframes(output_frames)
+	out.close()
 
 	print("Done." + " " * 10)
