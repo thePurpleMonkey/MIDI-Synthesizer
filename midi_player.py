@@ -128,24 +128,12 @@ class Tempo:
 	def __lt__(self, other):
 		return self.start < other.start
 
-
 class Note:
-	cache = dict()
-
 	def __init__(self, note, start=0, duration=0, velocity=100):
 		self.note = note
 		self.start = start
 		self.duration = duration
 		self.velocity = velocity
-
-	def synthesize(self, func, *args, **kwargs):
-		if self not in Note.cache:
-			try:
-				Note.cache[self] = func(self.duration, FREQS[self.note], *args, **kwargs)
-			except KeyError:
-				raise SynthesizationError("Unable to convert MIDI note {} to frequency!".format(self.note))
-
-		return Note.cache[self]
 
 	# For debugging and display
 	def __str__(self):
@@ -183,6 +171,7 @@ if __name__ == "__main__":
 
 	raw_samples = array.array('d', [0] * math.floor(mid.length * SAMPLE_RATE))
 
+	cache = {"miss": 0, "total": 0}
 	for i, note in enumerate(score):
 		print("\rSynthesizing note {} of {}...".format(i, len(score)), end="", flush=True)
 
@@ -190,9 +179,22 @@ if __name__ == "__main__":
 			tempo = note.tempo
 
 		elif isinstance(note, Note):
-			start = math.floor(note.start * SAMPLE_RATE)
-			samples = sine(math.floor(SAMPLE_RATE * note.duration), FREQS[note.note], 4)
+			# Cache synths for reuse
+			cache["total"] += 1
+			if note not in cache:
+				cache["miss"] += 1
+				cache[note] = sine(math.floor(SAMPLE_RATE * note.duration), FREQS[note.note], 4)
 
+			samples = cache[note]
+
+			# Attenuate end of sample to avoid clicking noise
+			# attenuation = 2000
+			attenuation = len(samples) // 50
+			index = len(samples) - attenuation
+			for j in range(attenuation):
+				samples[index + j] -= samples[index + j] * (j / attenuation)
+
+			start = math.floor(note.start * SAMPLE_RATE)
 			for j in range(len(samples)):
 				raw_samples[start + j] += samples[j] * note.velocity
 
@@ -216,3 +218,4 @@ if __name__ == "__main__":
 	out.close()
 
 	print("Done." + " " * 10)
+	print("Cache hit rate: {:2.1f}%".format((cache["total"] - cache["miss"])*100/cache["total"]))
