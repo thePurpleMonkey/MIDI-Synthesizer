@@ -8,6 +8,7 @@ FREQS = {}
 for n in range(128):
 	FREQS[n] = 440 * 2**((n-69)/12)
 	
+"""Generates samples of a sine wave(s)."""
 def sine(nsamples, frequency, num_harmonics=0):
 	result = array.array('d', [0] * nsamples)
 	
@@ -19,6 +20,7 @@ def sine(nsamples, frequency, num_harmonics=0):
 
 	return result
 
+"""Scales a list of floating point samples to signed 2-byte integers."""
 def scale(samples):
 	# Calculate scaling factors
 	old_max = max(samples)
@@ -37,34 +39,65 @@ def scale(samples):
 
 	return scaled_samples
 
+class Message:
+	def __init__(self, start_tick=0, msg=None):
+		self.start_tick = start_tick
+		self.msg = msg
+
+	def __str__(self):
+		return "Message(start_tick={}, msg={})".format(self.start_tick, self.msg)
+
+	def __lt__(self, other):
+		return self.start_tick < other.start_tick
+
 def parse_midi(filename):
 	score = []
 	playing = []
-	total_time = 0
 	tempo = 500000
 
 	midi_file = mido.MidiFile(filename)
+	print("Number of tracks:", len(midi_file.tracks))
 
+	# Combine all tracks into a single list
+	combined = []
 	for track in midi_file.tracks:
+		total_ticks = 0
 		for msg in track:
-			if not msg.is_meta:
-				total_time += msg.time
+			total_ticks += msg.time
+			combined.append(Message(total_ticks, msg))
 
-			# print(msg)
+	# Sort the commands to be in order
+	combined.sort()
+	# print("\n".join(str(n) for n in combined))
 
-			if msg.type == "set_tempo":
-				tempo = msg.tempo
-				print("Tempo set to", tempo)
-			elif msg.type == "note_on" and msg.velocity > 0:
-				start_sample = math.floor(SAMPLE_RATE * mido.tick2second(total_time, midi_file.ticks_per_beat, tempo))
-				playing.append(Note(msg.note, start_sample, velocity=msg.velocity))
-			
-			if msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-				for j in range(len(playing)):
-					if playing[j].note == msg.note:
-						playing[j].duration = math.floor(SAMPLE_RATE * mido.tick2second(total_time, midi_file.ticks_per_beat, tempo)) - playing[j].start
-						score.append(playing.pop(j))
-						break
+	total_seconds = 0.0
+	total_ticks = 0
+	for message in combined:
+		msg = message.msg
+
+		delta_ticks = message.start_tick - total_ticks
+		total_ticks = message.start_tick
+		total_seconds += mido.tick2second(delta_ticks, midi_file.ticks_per_beat, tempo)
+
+		# print(msg)
+
+		# Set tempo for song
+		if msg.type == "set_tempo":
+			tempo = msg.tempo
+			score.append(Tempo(total_seconds, msg.tempo))
+			print("Tempo set to {} at {:.2f} seconds ({} ticks)".format(tempo, total_seconds, total_ticks))
+
+		# Start playing note
+		elif msg.type == "note_on" and msg.velocity > 0:
+			playing.append(Note(msg.note, total_seconds, velocity=msg.velocity))
+		
+		# End playing note
+		if msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+			for j in range(len(playing)):
+				if playing[j].note == msg.note:
+					playing[j].duration = total_seconds - playing[j].start
+					score.append(playing.pop(j))
+					break
 
 	print("Leftover notes:", len(playing))
 	score.extend(playing)
@@ -75,6 +108,26 @@ def parse_midi(filename):
 
 class SynthesizationError(Exception):
 	pass
+
+class Tempo:
+	def __init__(self, start, tempo):
+		self.start = start
+		self.tempo = tempo
+		self.duration = 0 # To be compatible with the Note object
+
+	def synthesize(self, *args, **kwargs):
+		return None
+
+	def __str__(self):
+		return "Tempo(start={:.3f}, tempo={})".format(self.start, self.tempo)
+
+	def __repr__(self):
+		return str(self)
+	
+	# For sorting notes in score
+	def __lt__(self, other):
+		return self.start < other.start
+
 
 class Note:
 	cache = dict()
@@ -96,7 +149,7 @@ class Note:
 
 	# For debugging and display
 	def __str__(self):
-		return "Note(note={}, start={}, duration={}, velocity={})".format(self.note, self.start, self.duration, self.velocity)
+		return "Note(note={}, start={:.3f}, duration={:.3f}, velocity={})".format(self.note, self.start, self.duration, self.velocity)
 
 	# For debugging and display
 	def __repr__(self):
@@ -121,20 +174,27 @@ if __name__ == "__main__":
 
 	print("Parsing MIDI file...")
 	score = parse_midi(sys.argv[1])
+	mid = mido.MidiFile(sys.argv[1])
+	# mid.print_tracks()
 
-	total_samples = 0
-	for note in score:
-		total_samples = max(total_samples, note.start + note.duration)
+	# print("\n".join(str(note) for note in score))
+	print("Song length: {:.3f} sec".format(mid.length))
+	tempo = 500000
 
-	raw_samples = array.array('d', [0] * total_samples)
+	raw_samples = array.array('d', [0] * math.floor(mid.length * SAMPLE_RATE))
 
 	for i, note in enumerate(score):
 		print("\rSynthesizing note {} of {}...".format(i, len(score)), end="", flush=True)
 
-		samples = note.synthesize(sine, num_harmonics=4)
+		if isinstance(note, Tempo):
+			tempo = note.tempo
 
-		for j in range(note.duration):
-			raw_samples[note.start + j] += samples[j] * note.velocity
+		elif isinstance(note, Note):
+			start = math.floor(note.start * SAMPLE_RATE)
+			samples = sine(math.floor(SAMPLE_RATE * note.duration), FREQS[note.note], 4)
+
+			for j in range(len(samples)):
+				raw_samples[start + j] += samples[j] * note.velocity
 
 	print("\rScaling output..." + " "*20, end="", flush=True)
 	samples = scale(raw_samples)
