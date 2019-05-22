@@ -1,6 +1,16 @@
-import wave, mido, sys, math, struct, array
+import wave, mido, sys, math, struct, array, random
+from dataclasses import dataclass
 
 SAMPLE_RATE = 44100
+
+@dataclass
+class Envelope:
+	"""Class for specifying a synthesis envelope for a note."""
+	attack: float = 0
+	decay: float = 0
+	sustain: float = .5
+	release: float = 0
+
 
 # Generate conversion from MIDI note to frequency.
 # Obtained from: http://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
@@ -11,7 +21,7 @@ for n in range(128):
 """Generates samples of a sine wave(s)."""
 def sine(nsamples, frequency, num_harmonics=0):
 	result = array.array('d', [0] * nsamples)
-	
+
 	for i in range(num_harmonics+1):
 		for j in range(nsamples):
 			w = 2.0 * math.pi * (frequency * (1 + 2*i)) * j
@@ -68,7 +78,6 @@ def parse_midi(filename):
 
 	# Sort the commands to be in order
 	combined.sort()
-	# print("\n".join(str(n) for n in combined))
 
 	total_seconds = 0.0
 	total_ticks = 0
@@ -113,10 +122,6 @@ class Tempo:
 	def __init__(self, start, tempo):
 		self.start = start
 		self.tempo = tempo
-		self.duration = 0 # To be compatible with the Note object
-
-	def synthesize(self, *args, **kwargs):
-		return None
 
 	def __str__(self):
 		return "Tempo(start={:.3f}, tempo={})".format(self.start, self.tempo)
@@ -134,6 +139,34 @@ class Note:
 		self.start = start
 		self.duration = duration
 		self.velocity = velocity
+
+	def synthesize(self, envelope=None):
+		num_samples = math.floor(SAMPLE_RATE * (note.duration + (envelope.release if envelope else 0)))
+		samples = sine(num_samples, FREQS[note.note], 2)
+
+		if envelope:
+			num_attack_samples = math.floor(envelope.attack * SAMPLE_RATE)
+			num_decay_samples = math.floor(envelope.decay * SAMPLE_RATE)
+			num_release_samples = math.floor(envelope.release * SAMPLE_RATE)
+
+			# Apply envelope attack
+			for i in range(num_attack_samples):
+				samples[i] *= i / num_attack_samples
+
+			# Apply envelope decay
+			sustain_level = num_decay_samples * envelope.sustain
+			for i in range(1, num_decay_samples):
+				samples[num_attack_samples + i] *= ((num_decay_samples - i) * (1 - envelope.sustain) + sustain_level) / num_decay_samples
+
+			# Apply envelope sustain
+			for i in range(num_attack_samples + num_decay_samples, len(samples)):
+				samples[i] *= envelope.sustain
+
+			# Apply envelope release
+			for i in range(num_release_samples):
+				samples[-i] *= i / num_release_samples
+
+		return samples
 
 	# For debugging and display
 	def __str__(self):
@@ -169,11 +202,13 @@ if __name__ == "__main__":
 	print("Song length: {:.3f} sec".format(mid.length))
 	tempo = 500000
 
-	raw_samples = array.array('d', [0] * math.floor(mid.length * SAMPLE_RATE))
+	envelope = Envelope(attack=.02, decay=.02, sustain=.5, release=.2)
+
+	raw_samples = array.array('d', [0] * math.floor((mid.length + (envelope.release if envelope else 0)) * SAMPLE_RATE))
 
 	cache = {"miss": 0, "total": 0}
 	for i, note in enumerate(score):
-		print("\rSynthesizing note {} of {}...".format(i, len(score)), end="", flush=True)
+		print("\rSynthesizing note {} of {}...".format(i+1, len(score)), end="", flush=True)
 
 		if isinstance(note, Tempo):
 			tempo = note.tempo
@@ -183,16 +218,9 @@ if __name__ == "__main__":
 			cache["total"] += 1
 			if note not in cache:
 				cache["miss"] += 1
-				cache[note] = sine(math.floor(SAMPLE_RATE * note.duration), FREQS[note.note], 4)
+				cache[note] = note.synthesize(envelope=envelope)
 
 			samples = cache[note]
-
-			# Attenuate end of sample to avoid clicking noise
-			# attenuation = 2000
-			attenuation = len(samples) // 50
-			index = len(samples) - attenuation
-			for j in range(attenuation):
-				samples[index + j] -= samples[index + j] * (j / attenuation)
 
 			start = math.floor(note.start * SAMPLE_RATE)
 			for j in range(len(samples)):
@@ -217,5 +245,5 @@ if __name__ == "__main__":
 	out.writeframes(output_frames)
 	out.close()
 
-	print("Done." + " " * 10)
+	print("Done.\a" + " " * 10)
 	print("Cache hit rate: {:2.1f}%".format((cache["total"] - cache["miss"])*100/cache["total"]))
