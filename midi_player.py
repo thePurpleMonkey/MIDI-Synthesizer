@@ -11,6 +11,10 @@ class Envelope:
 	sustain: float = .5
 	release: float = 0
 
+@dataclass
+class Tremolo:
+	frequency: float = 5
+	amplitude: float = .25
 
 # Generate conversion from MIDI note to frequency.
 # Obtained from: http://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
@@ -140,7 +144,7 @@ class Note:
 		self.duration = duration
 		self.velocity = velocity
 
-	def synthesize(self, envelope=None):
+	def synthesize(self, envelope=None, tremolo=None):
 		num_samples = math.floor(SAMPLE_RATE * (note.duration + (envelope.release if envelope else 0)))
 		samples = sine(num_samples, FREQS[note.note], 2)
 
@@ -165,6 +169,12 @@ class Note:
 			# Apply envelope release
 			for i in range(num_release_samples):
 				samples[-i] *= i / num_release_samples
+
+		if tremolo:
+			for i in range(len(samples)):
+				s = math.sin((2.0 * math.pi * tremolo.frequency * i) / SAMPLE_RATE)
+				s = (s * tremolo.amplitude) + 1
+				samples[i] *= s
 
 		return samples
 
@@ -204,6 +214,8 @@ if __name__ == "__main__":
 
 	envelope = Envelope(attack=.02, decay=.02, sustain=.5, release=.2)
 
+	tremolo = Tremolo(amplitude=.5, frequency=5)
+
 	raw_samples = array.array('d', [0] * math.floor((mid.length + (envelope.release if envelope else 0)) * SAMPLE_RATE))
 
 	cache = {"miss": 0, "total": 0}
@@ -218,7 +230,7 @@ if __name__ == "__main__":
 			cache["total"] += 1
 			if note not in cache:
 				cache["miss"] += 1
-				cache[note] = note.synthesize(envelope=envelope)
+				cache[note] = note.synthesize(envelope=envelope, tremolo=tremolo)
 
 			samples = cache[note]
 
