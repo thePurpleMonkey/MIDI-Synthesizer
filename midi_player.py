@@ -16,6 +16,11 @@ class Tremolo:
 	frequency: float = 5
 	amplitude: float = .25
 
+@dataclass
+class Delay:
+	delay: float = 20
+	level: float = .5
+
 # Generate conversion from MIDI note to frequency.
 # Obtained from: http://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
 FREQS = {}
@@ -214,8 +219,11 @@ if __name__ == "__main__":
 
 	envelope = Envelope(attack=.02, decay=.02, sustain=.5, release=.2)
 
-	tremolo = Tremolo(amplitude=.5, frequency=5)
-
+	# Effects
+	# tremolo = Tremolo(amplitude=.5, frequency=5)
+	tremolo = None
+	delay = Delay(level=.5, delay=.5)
+	# delay = None
 	raw_samples = array.array('d', [0] * math.floor((mid.length + (envelope.release if envelope else 0)) * SAMPLE_RATE))
 
 	cache = {"miss": 0, "total": 0}
@@ -238,7 +246,14 @@ if __name__ == "__main__":
 			for j in range(len(samples)):
 				raw_samples[start + j] += samples[j] * note.velocity
 
-	print("\rScaling output..." + " "*20, end="", flush=True)
+	print("\rApplying effects..." + " "*20, end="", flush=True)
+	# Post synthesis effects
+	if delay:
+		delay_length = math.floor(delay.delay * SAMPLE_RATE)
+		for i in range(len(raw_samples) - delay_length):
+			raw_samples[i+delay_length] += raw_samples[i]*delay.level
+
+	print("\rScaling output...  ", end="", flush=True)
 	samples = scale(raw_samples)
 
 	print("\rWriting wav file...", end="", flush=True)
