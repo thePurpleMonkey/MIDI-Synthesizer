@@ -1,6 +1,19 @@
 import wave, mido, sys, math, struct, array, random
 from dataclasses import dataclass
 
+try:
+	import mido
+except ImportError:
+	print("Unable to import mido! Please install mido and try again.", file=sys.stderr)
+	sys.exit(0)
+
+sa = None
+
+try:
+	import simpleaudio as sa
+except ImportError:
+	print("Unable to import simpleaudio! Audio output disabled.", file=sys.stderr)
+
 SAMPLE_RATE = 44100
 
 @dataclass
@@ -20,6 +33,12 @@ class Tremolo:
 class Delay:
 	delay: float = 20
 	level: float = .5
+
+@dataclass
+class Flanger:
+	rate: float = 1
+	depth: float = 1
+	resonance: float = 1
 
 # Generate conversion from MIDI note to frequency.
 # Obtained from: http://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
@@ -41,22 +60,8 @@ def sine(nsamples, frequency, num_harmonics=0):
 
 """Scales a list of floating point samples to signed 2-byte integers."""
 def scale(samples):
-	# Calculate scaling factors
-	old_max = max(samples)
-	old_min = min(samples)
-	new_max = 2**15-1
-	new_min = -2**15
-
-	old_range = (old_max - old_min)  
-	new_range = (new_max - new_min) 
-
-	scaled_samples = array.array("h") 
-	
-	# Scale each sample
-	for sample in samples:
-		scaled_samples.append(round((((sample - old_min) * new_range) / old_range) + new_min))
-
-	return scaled_samples
+	scale_factor = max(abs(max(samples)), abs(min(samples)))
+	return [math.floor((sample/scale_factor) * (2**15-1)) for sample in samples]
 
 class Message:
 	def __init__(self, start_tick=0, msg=None):
@@ -117,7 +122,8 @@ def parse_midi(filename):
 					score.append(playing.pop(j))
 					break
 
-	print("Leftover notes:", len(playing))
+	if len(playing) > 0:
+		print("Leftover notes:", len(playing))
 	score.extend(playing)
 	score.sort()
 	print("Score length: ", len(score))
@@ -151,7 +157,7 @@ class Note:
 
 	def synthesize(self, envelope=None, tremolo=None):
 		num_samples = math.floor(SAMPLE_RATE * (note.duration + (envelope.release if envelope else 0)))
-		samples = sine(num_samples, FREQS[note.note], 2)
+		samples = sine(num_samples, FREQS[note.note], 1)
 
 		if envelope:
 			num_attack_samples = math.floor(envelope.attack * SAMPLE_RATE)
@@ -217,14 +223,17 @@ if __name__ == "__main__":
 	print("Song length: {:.3f} sec".format(mid.length))
 	tempo = 500000
 
-	envelope = Envelope(attack=.02, decay=.02, sustain=.5, release=.2)
+	envelope = Envelope(attack=.02, decay=.02, sustain=.70, release=.2)
+	# envelope = Envelope(attack=.02, decay=.02, sustain=.25, release=.2)
 
 	# Effects
-	# tremolo = Tremolo(amplitude=.5, frequency=5)
+	# tremolo = Tremolo(amplitude=.3, frequency=5)
 	tremolo = None
-	delay = Delay(level=.5, delay=.5)
+	delay = Delay(level=.7, delay=.3)
 	# delay = None
-	raw_samples = array.array('d', [0] * math.floor((mid.length + (envelope.release if envelope else 0)) * SAMPLE_RATE))
+
+
+	raw_samples = array.array('d', [0] * math.floor((mid.length + (envelope.release if envelope else 0) + (delay.delay * 5 if delay else 0)) * SAMPLE_RATE))
 
 	cache = {"miss": 0, "total": 0}
 	for i, note in enumerate(score):
@@ -253,6 +262,12 @@ if __name__ == "__main__":
 		for i in range(len(raw_samples) - delay_length):
 			raw_samples[i+delay_length] += raw_samples[i]*delay.level
 
+		# Attenuate end of track
+		for i in range(1, math.floor(delay.delay * SAMPLE_RATE)):
+			raw_samples[-i] *= 1 / i
+			if i % 100 == 0:
+				print(1/i)
+
 	print("\rScaling output...  ", end="", flush=True)
 	samples = scale(raw_samples)
 
@@ -272,5 +287,15 @@ if __name__ == "__main__":
 	out.writeframes(output_frames)
 	out.close()
 
-	print("Done.\a" + " " * 10)
-	print("Cache hit rate: {:2.1f}%".format((cache["total"] - cache["miss"])*100/cache["total"]))
+	print("\rCache hit rate: {:2.1f}%".format((cache["total"] - cache["miss"])*100/cache["total"]))
+
+	if sa:
+		print("\rPlaying audio file...")
+		try:
+			sa.play_buffer(output_frames, 1, 2, SAMPLE_RATE).wait_done()
+		except KeyboardInterrupt:
+			pass
+	else:
+		print("\a", end="")
+
+	print("\rDone." + " " * 10)
