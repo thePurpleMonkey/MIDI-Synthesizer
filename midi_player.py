@@ -1,4 +1,4 @@
-import wave, mido, sys, math, struct, array, random
+import wave, mido, sys, math, struct, array, random, argparse
 from dataclasses import dataclass
 
 try:
@@ -128,10 +128,7 @@ def parse_midi(filename):
 	score.sort()
 	print("Score length: ", len(score))
 
-	return score
-
-class SynthesizationError(Exception):
-	pass
+	return score, midi_file.length
 
 class Tempo:
 	def __init__(self, start, tempo):
@@ -155,36 +152,35 @@ class Note:
 		self.duration = duration
 		self.velocity = velocity
 
-	def synthesize(self, envelope=None, tremolo=None):
-		num_samples = math.floor(SAMPLE_RATE * (note.duration + (envelope.release if envelope else 0)))
-		samples = sine(num_samples, FREQS[note.note], 1)
+	def synthesize(self, opts):
+		num_samples = math.floor(SAMPLE_RATE * (self.duration + opts.envelope.release))
+		samples = sine(num_samples, FREQS[self.note], 1)
 
-		if envelope:
-			num_attack_samples = math.floor(envelope.attack * SAMPLE_RATE)
-			num_decay_samples = math.floor(envelope.decay * SAMPLE_RATE)
-			num_release_samples = math.floor(envelope.release * SAMPLE_RATE)
+		num_attack_samples = math.floor(opts.envelope.attack * SAMPLE_RATE)
+		num_decay_samples = math.floor(opts.envelope.decay * SAMPLE_RATE)
+		num_release_samples = math.floor(opts.envelope.release * SAMPLE_RATE)
 
-			# Apply envelope attack
-			for i in range(num_attack_samples):
-				samples[i] *= i / num_attack_samples
+		# Apply envelope attack
+		for i in range(min(num_attack_samples, num_samples)):
+			samples[i] *= i / num_attack_samples
 
-			# Apply envelope decay
-			sustain_level = num_decay_samples * envelope.sustain
-			for i in range(1, num_decay_samples):
-				samples[num_attack_samples + i] *= ((num_decay_samples - i) * (1 - envelope.sustain) + sustain_level) / num_decay_samples
+		# Apply envelope decay
+		sustain_level = num_decay_samples * opts.envelope.sustain
+		for i in range(1, min(num_decay_samples, num_samples - num_attack_samples)):
+			samples[num_attack_samples + i] *= ((num_decay_samples - i) * (1 - opts.envelope.sustain) + sustain_level) / num_decay_samples
 
-			# Apply envelope sustain
-			for i in range(num_attack_samples + num_decay_samples, len(samples)):
-				samples[i] *= envelope.sustain
+		# Apply envelope sustain
+		for i in range(num_attack_samples + num_decay_samples, len(samples)):
+			samples[i] *= opts.envelope.sustain
 
-			# Apply envelope release
-			for i in range(num_release_samples):
-				samples[-i] *= i / num_release_samples
+		# Apply envelope release
+		for i in range(num_release_samples):
+			samples[-i] *= i / num_release_samples
 
-		if tremolo:
+		if opts.tremolo:
 			for i in range(len(samples)):
-				s = math.sin((2.0 * math.pi * tremolo.frequency * i) / SAMPLE_RATE)
-				s = (s * tremolo.amplitude) + 1
+				s = math.sin((2.0 * math.pi * opts.tremolo.frequency * i) / SAMPLE_RATE)
+				s = (s * opts.tremolo.amplitude) + 1
 				samples[i] *= s
 
 		return samples
@@ -209,31 +205,20 @@ class Note:
 	def __hash__(self):
 		return hash((self.note, self.duration))
 
-if __name__ == "__main__":
-	if len(sys.argv) < 3:
-		print("USAGE: python3 {} <midi input file> <wav output file>".format(sys.argv[0]), file=sys.stderr)
-		exit(1)
-
+def main(opts):
 	print("Parsing MIDI file...")
-	score = parse_midi(sys.argv[1])
-	mid = mido.MidiFile(sys.argv[1])
-	# mid.print_tracks()
+	score, length = parse_midi(sys.argv[1])
 
 	# print("\n".join(str(note) for note in score))
-	print("Song length: {:.3f} sec".format(mid.length))
+	print("Song length: {:.3f} sec".format(length))
 	tempo = 500000
 
-	envelope = Envelope(attack=.02, decay=.02, sustain=.70, release=.2)
-	# envelope = Envelope(attack=.02, decay=.02, sustain=.25, release=.2)
+	length += opts.envelope.release
 
-	# Effects
-	# tremolo = Tremolo(amplitude=.3, frequency=5)
-	tremolo = None
-	delay = Delay(level=.7, delay=.3)
-	# delay = None
+	if opts.delay:
+		length += opts.delay.delay * 5
 
-
-	raw_samples = array.array('d', [0] * math.floor((mid.length + (envelope.release if envelope else 0) + (delay.delay * 5 if delay else 0)) * SAMPLE_RATE))
+	raw_samples = array.array('d', [0] * math.floor(length * SAMPLE_RATE))
 
 	cache = {"miss": 0, "total": 0}
 	for i, note in enumerate(score):
@@ -247,7 +232,7 @@ if __name__ == "__main__":
 			cache["total"] += 1
 			if note not in cache:
 				cache["miss"] += 1
-				cache[note] = note.synthesize(envelope=envelope, tremolo=tremolo)
+				cache[note] = note.synthesize(opts)
 
 			samples = cache[note]
 
@@ -257,38 +242,40 @@ if __name__ == "__main__":
 
 	print("\rApplying effects..." + " "*20, end="", flush=True)
 	# Post synthesis effects
-	if delay:
-		delay_length = math.floor(delay.delay * SAMPLE_RATE)
+	if opts.delay:
+		delay_length = math.floor(opts.delay.delay * SAMPLE_RATE)
 		for i in range(len(raw_samples) - delay_length):
-			raw_samples[i+delay_length] += raw_samples[i]*delay.level
+			raw_samples[i+delay_length] += raw_samples[i]*opts.delay.level
 
 		# Attenuate end of track
-		length = math.floor(delay.delay * SAMPLE_RATE)
+		length = math.floor(opts.delay.delay * SAMPLE_RATE)
 		for i in range(length):
 			raw_samples[-i] *= i / length
 
 	print("\rScaling output...  ", end="", flush=True)
 	samples = scale(raw_samples)
 
-	print("\rWriting wav file...", end="", flush=True)
 	# Convert raw samples to 2-byte frames
+	print("\rConverting output...", end="", flush=True)
 	output_frames = bytearray(len(samples) * 2)
 	for i, sample in enumerate(samples):
 		output_frames[i*2:i*2+2] = struct.pack("<h", sample)
 
 	# Open output file
-	out = wave.open(sys.argv[2], "wb")
-	out.setnchannels(1)
-	out.setsampwidth(2)
-	out.setframerate(SAMPLE_RATE)
+	if opts.out_file:
+		print("\rWriting wav file...", end="", flush=True)
+		out = wave.open(opts.out_file)
+		out.setnchannels(1)
+		out.setsampwidth(2)
+		out.setframerate(SAMPLE_RATE)
 
-	# Write samples
-	out.writeframes(output_frames)
-	out.close()
+		# Write samples
+		out.writeframes(output_frames)
+		out.close()
 
 	print("\rCache hit rate: {:2.1f}%".format((cache["total"] - cache["miss"])*100/cache["total"]))
 
-	if sa:
+	if sa and opts.play:
 		print("\rPlaying audio file...")
 		try:
 			sa.play_buffer(output_frames, 1, 2, SAMPLE_RATE).wait_done()
@@ -298,3 +285,17 @@ if __name__ == "__main__":
 		print("\a", end="")
 
 	print("\rDone." + " " * 10)
+
+class EffectAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, self.const(*values))
+
+if __name__ == "__main__":
+	parser = argparse.ArgumentParser(description="Synthesizes a midi file")
+	parser.add_argument("midi", help="Filename of midi file to synthesize")
+	parser.add_argument("-p", "--play", help="Play the audio after synthesizing it", action="store_true")
+	parser.add_argument("-o", "--output", type=argparse.FileType('wb'), dest="out_file", metavar="filename", help="Save the synthesized audio to a wav file with the given filename")
+	parser.add_argument("--tremolo", nargs=2, type=float, action=EffectAction, const=Tremolo, help="Add tremolo effect", metavar=("frequency", "amplitude"))
+	parser.add_argument("--delay", nargs=2, type=float, action=EffectAction, const=Delay, help="Add a delay effect", metavar=("delay", "level"))
+	parser.add_argument("--envelope", nargs=4, type=float, action=EffectAction, const=Envelope, help="ADSR envelope to apply to each note", metavar=("attack", "decay", "sustain", "release"), default=Envelope(attack=.02, decay=.02, sustain=.70, release=.2))
+	main(parser.parse_args())
