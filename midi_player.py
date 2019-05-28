@@ -263,10 +263,9 @@ if __name__ == "__main__":
 			raw_samples[i+delay_length] += raw_samples[i]*delay.level
 
 		# Attenuate end of track
-		for i in range(1, math.floor(delay.delay * SAMPLE_RATE)):
-			raw_samples[-i] *= 1 / i
-			if i % 100 == 0:
-				print(1/i)
+		length = math.floor(delay.delay * SAMPLE_RATE)
+		for i in range(length):
+			raw_samples[-i] *= i / length
 
 	print("\rScaling output...  ", end="", flush=True)
 	samples = scale(raw_samples)
