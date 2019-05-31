@@ -46,20 +46,39 @@ FREQS = {}
 for n in range(128):
 	FREQS[n] = 440 * 2**((n-69)/12)
 	
-"""Generates samples of a sine wave(s)."""
 def sine(nsamples, frequency, num_harmonics=0):
+	"""Generates samples of a sine wave(s)."""
 	result = array.array('d', [0] * nsamples)
 
 	for i in range(num_harmonics+1):
 		for j in range(nsamples):
-			w = 2.0 * math.pi * (frequency * (1 + 2*i)) * j
-			s = math.sin(w / SAMPLE_RATE)
-			result[j] += s / (1<<i)
+			# w = 2.0 * math.pi * (frequency * (1 + 2*i)) * j
+			# s = math.sin(w / SAMPLE_RATE)
+			# result[j] += s / (1<<i)
+
+			result[j] += (math.sin((2.0 * math.pi * (frequency * (1 + 2*i)) * j) / SAMPLE_RATE)) / (1<<i)
 
 	return result
 
-"""Scales a list of floating point samples to signed 2-byte integers."""
+def fm(nsamples, fcarrier, fmod, amod):	
+	"""
+	Generates a frequency-modulated wave.
+
+	Adapted from: https://github.com/pdx-cs-sound/fm/blob/master/fm.py
+	"""
+
+	result = array.array('d', [0] * nsamples)
+	hz_to_rads = 2 * math.pi / SAMPLE_RATE
+
+	for i in range(nsamples):
+		m = amod * math.sin(hz_to_rads * fmod * i)
+		result[i] = math.sin(hz_to_rads * fcarrier * (i + m))
+
+	return result
+
 def scale(samples):
+	"""Scales a list of floating point samples to signed 2-byte integers."""
+	
 	scale_factor = max(abs(max(samples)), abs(min(samples)))
 	return [math.floor((sample/scale_factor) * (2**15-1)) for sample in samples]
 
@@ -154,7 +173,11 @@ class Note:
 
 	def synthesize(self, opts):
 		num_samples = math.floor(SAMPLE_RATE * (self.duration + opts.envelope.release))
-		samples = sine(num_samples, FREQS[self.note], 1)
+
+		if opts.synthesizer == "sine":
+			samples = sine(num_samples, FREQS[self.note], 1)
+		elif opts.synthesizer == "fm":
+			samples = fm(num_samples, FREQS[self.note], opts.fmod, opts.amod)
 
 		num_attack_samples = math.floor(opts.envelope.attack * SAMPLE_RATE)
 		num_decay_samples = math.floor(opts.envelope.decay * SAMPLE_RATE)
@@ -287,8 +310,8 @@ def main(opts):
 	print("\rDone." + " " * 10)
 
 class EffectAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        setattr(namespace, self.dest, self.const(*values))
+	def __call__(self, parser, namespace, values, option_string=None):
+		setattr(namespace, self.dest, self.const(*values))
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description="Synthesizes a midi file")
@@ -298,4 +321,7 @@ if __name__ == "__main__":
 	parser.add_argument("--tremolo", nargs=2, type=float, action=EffectAction, const=Tremolo, help="Add tremolo effect", metavar=("frequency", "amplitude"))
 	parser.add_argument("--delay", nargs=2, type=float, action=EffectAction, const=Delay, help="Add a delay effect", metavar=("delay", "level"))
 	parser.add_argument("--envelope", nargs=4, type=float, action=EffectAction, const=Envelope, help="ADSR envelope to apply to each note", metavar=("attack", "decay", "sustain", "release"), default=Envelope(attack=.02, decay=.02, sustain=.70, release=.2))
+	parser.add_argument("-s", "--synthesizer", choices=("sine", "fm"), default="sine", help="What engine to use when synthesizing a note")
+	parser.add_argument("--fmod", type=float, default=50, help="Frequency modulation of fm synthesizer")
+	parser.add_argument("--amod", type=float, default=50, help="Amplitude of modulation of fm synthesizer")
 	main(parser.parse_args())
