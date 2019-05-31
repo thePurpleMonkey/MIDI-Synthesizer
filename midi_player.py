@@ -46,11 +46,11 @@ FREQS = {}
 for n in range(128):
 	FREQS[n] = 440 * 2**((n-69)/12)
 	
-def sine(nsamples, frequency, num_harmonics=0):
+def sine(nsamples, frequency, harmonics=0):
 	"""Generates samples of a sine wave(s)."""
 	result = array.array('d', [0] * nsamples)
 
-	for i in range(num_harmonics+1):
+	for i in range(harmonics+1):
 		for j in range(nsamples):
 			# w = 2.0 * math.pi * (frequency * (1 + 2*i)) * j
 			# s = math.sin(w / SAMPLE_RATE)
@@ -175,7 +175,7 @@ class Note:
 		num_samples = math.floor(SAMPLE_RATE * (self.duration + opts.envelope.release))
 
 		if opts.synthesizer == "sine":
-			samples = sine(num_samples, FREQS[self.note], 1)
+			samples = sine(num_samples, FREQS[self.note], opts.harmonics)
 		elif opts.synthesizer == "fm":
 			samples = fm(num_samples, FREQS[self.note], opts.fmod, opts.amod)
 
@@ -322,6 +322,7 @@ if __name__ == "__main__":
 	parser.add_argument("--delay", nargs=2, type=float, action=EffectAction, const=Delay, help="Add a delay effect", metavar=("delay", "level"))
 	parser.add_argument("--envelope", nargs=4, type=float, action=EffectAction, const=Envelope, help="ADSR envelope to apply to each note", metavar=("attack", "decay", "sustain", "release"), default=Envelope(attack=.02, decay=.02, sustain=.70, release=.2))
 	parser.add_argument("-s", "--synthesizer", choices=("sine", "fm"), default="sine", help="What engine to use when synthesizing a note")
-	parser.add_argument("--fmod", type=float, default=50, help="Frequency modulation of fm synthesizer")
-	parser.add_argument("--amod", type=float, default=50, help="Amplitude of modulation of fm synthesizer")
+	parser.add_argument("--fmod", type=float, default=50, help="Frequency modulation of fm synthesizer", metavar="frequency")
+	parser.add_argument("--amod", type=float, default=50, help="Amplitude of modulation of fm synthesizer", metavar="amplitude")
+	parser.add_argument("--harmonics", type=int, default=1, help="Number of odd harmonics to generate and add to signal", metavar="harmonics")
 	main(parser.parse_args())
