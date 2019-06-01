@@ -64,6 +64,7 @@ def fm(nsamples, fcarrier, fmod, amod):
 	Generates a frequency-modulated wave.
 
 	Adapted from: https://github.com/pdx-cs-sound/fm/blob/master/fm.py
+	Courtesy of Bart Massey, used with permission.
 	"""
 
 	result = array.array('d', [0] * nsamples)

@@ -67,3 +67,7 @@ Amplitude is in hertz.
 `--harmonics harmonics`
 Number of odd harmonics to generate and add to the signal.
 Harmonics is an integer. The more harmonics, the longer it takes to synthesize.
+
+## Acknowledgements 
+The fm synthesizer was adapted from code provided by Bart Massey.
+https://github.com/pdx-cs-sound/fm/blob/master/fm.py
