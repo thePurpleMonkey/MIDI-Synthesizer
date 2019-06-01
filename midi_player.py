@@ -7,12 +7,11 @@ except ImportError:
 	print("Unable to import mido! Please install mido and try again.", file=sys.stderr)
 	sys.exit(0)
 
-sa = None
-
 try:
 	import simpleaudio as sa
 except ImportError:
-	print("Unable to import simpleaudio! Audio output disabled.", file=sys.stderr)
+	pass
+	# print("Unable to import simpleaudio! Audio output disabled.", file=sys.stderr)
 
 SAMPLE_RATE = 44100
 
@@ -318,11 +317,22 @@ if __name__ == "__main__":
 	parser.add_argument("midi", help="Filename of midi file to synthesize")
 	parser.add_argument("-p", "--play", help="Play the audio after synthesizing it", action="store_true")
 	parser.add_argument("-o", "--output", type=argparse.FileType('wb'), dest="out_file", metavar="filename", help="Save the synthesized audio to a wav file with the given filename")
-	parser.add_argument("--tremolo", nargs=2, type=float, action=EffectAction, const=Tremolo, help="Add tremolo effect", metavar=("frequency", "amplitude"))
-	parser.add_argument("--delay", nargs=2, type=float, action=EffectAction, const=Delay, help="Add a delay effect", metavar=("delay", "level"))
+	parser.add_argument("--tremolo", nargs="*", type=float, action=EffectAction, const=Tremolo, help="Add tremolo effect", metavar=("frequency", "amplitude"))
+	parser.add_argument("--delay", nargs="*", type=float, action=EffectAction, const=Delay, help="Add a delay effect", metavar=("delay", "level"))
 	parser.add_argument("--envelope", nargs=4, type=float, action=EffectAction, const=Envelope, help="ADSR envelope to apply to each note", metavar=("attack", "decay", "sustain", "release"), default=Envelope(attack=.02, decay=.02, sustain=.70, release=.2))
 	parser.add_argument("-s", "--synthesizer", choices=("sine", "fm"), default="sine", help="What engine to use when synthesizing a note")
 	parser.add_argument("--fmod", type=float, default=50, help="Frequency modulation of fm synthesizer", metavar="frequency")
 	parser.add_argument("--amod", type=float, default=50, help="Amplitude of modulation of fm synthesizer", metavar="amplitude")
 	parser.add_argument("--harmonics", type=int, default=1, help="Number of odd harmonics to generate and add to signal", metavar="harmonics")
-	main(parser.parse_args())
+
+	opts = parser.parse_args()
+
+	if not opts.play and not opts.out_file:
+		print("You must supply either the --play flag, --output flag, or both. Otherwise, what are you even trying to do?", file=sys.stderr)
+		sys.exit(0)
+
+	if opts.play and "simpleaudio" not in sys.modules:
+		print("Simple Audio not installed. Please install the simpleaudio package and try again.", file=sys.stderr)
+		sys.exit(0)
+
+	main(opts)
