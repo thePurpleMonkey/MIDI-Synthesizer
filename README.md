@@ -49,6 +49,11 @@ Apply a standard ADSR envelope to each note
 Attack, decay, and release are in seconds. Sustain is a percentage volume [0, 1].
 Default is .02 attack, .02 decay, .7 sustain, and .2 release.
 
+`--transpose steps`
+Transpose all notes in the score up or down a given number of steps.
+Steps is an integer. Positive numbers transpose up half-steps, and 
+negative numbers transpose down half-steps.
+
 `-s {sine,fm}, --synthesizer {sine,fm}`
 What method to use when synthesizing a note. Possible options are `sine` to
 which uses pure sine waves, and `fm` which uses frequency modulation.
