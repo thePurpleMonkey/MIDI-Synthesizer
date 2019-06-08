@@ -16,7 +16,11 @@ class TestMidiSynthesizer(unittest.TestCase):
 		self.assertEqual(midi_player.scale(l), [-max_short, -max_short // 2, 0, max_short // 2])
 
 	def test_message(self):
-		pass
+		messages = [midi_player.Message(9), midi_player.Message(2), midi_player.Message(5)]
+		messages.sort()
+		self.assertEqual(messages[0].start_tick, 2)
+		self.assertEqual(messages[1].start_tick, 5)
+		self.assertEqual(messages[2].start_tick, 9)
 
 
 if __name__ == '__main__':
