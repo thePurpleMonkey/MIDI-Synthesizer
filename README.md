@@ -76,6 +76,22 @@ The next steps converts the samples from floats in the [-1, 1] range to discrete
 samples from floats to 2-byte integers and stored as an array. The array can then be used to 
 play the synthesized audio as a raw PCM stream, or save it using the built-in Python wav package.
 
+### How it doesn't work
+Currently, the program is hard-coded to produce 16 bit PCM data. It shouldn't be too hard to
+extend it to allow the user to select the number of bits of the output (8, 16, or 24), but 
+to keep the program simple this was not implemented in this version.
+
+The program was written in a partially modularized fashion. The goal was to keep the source 
+code simple, and also allow the program to be used as a library for other software synthesizers.
+Modules could be improved and/or swapped out as needed. That goal was partially met. The algorithm
+is split between three large functions. Those functions need to be broken up into smaller, more 
+self-contained chunks for this goal to be fully realized. It is achievable with some moderate
+amount of work.
+
+More effects can be added as well. It should be easy to add effects wherever they are needed.
+Effects can be applied to the note, the samples of a synthesized note, or the samples of the
+whole track. There are examples of each implemented (tranpose, tremolo, and delay, respectively).
+
 
 ## Dependencies
 This project requires Python 3.7 to run.
