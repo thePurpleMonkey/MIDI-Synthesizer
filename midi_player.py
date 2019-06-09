@@ -239,7 +239,6 @@ def main(opts):
 
 	# print("\n".join(str(note) for note in score))
 	print("Song length: {:.3f} sec".format(length))
-	tempo = 500000
 
 	length += opts.envelope.release
 
@@ -252,10 +251,7 @@ def main(opts):
 	for i, note in enumerate(score):
 		print("\rSynthesizing note {} of {}...".format(i+1, len(score)), end="", flush=True)
 
-		if isinstance(note, Tempo):
-			tempo = note.tempo
-
-		elif isinstance(note, Note):
+		if isinstance(note, Note):
 			# Cache synths for reuse
 			cache["total"] += 1
 			if note not in cache:
